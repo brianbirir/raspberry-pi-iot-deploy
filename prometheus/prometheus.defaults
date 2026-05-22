@@ -1,0 +1,4 @@
+# Deployed to /etc/default/prometheus on the Pi.
+# Sourced by prometheus.service (EnvironmentFile=...) so $ARGS reaches
+# the binary as `/usr/bin/prometheus $ARGS`.
+ARGS="--enable-feature=agent --storage.agent.path=/var/lib/prometheus/agent --web.listen-address=127.0.0.1:9090 --config.file=/etc/prometheus/prometheus.yml"

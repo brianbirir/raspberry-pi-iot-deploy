@@ -57,70 +57,135 @@ nothing Grafana-specific runs on the Pi.
 
 ## Current state on the Pi
 
-| Component                         | State                                         |
-| --------------------------------- | --------------------------------------------- |
-| `prometheus-node-exporter` 1.5.0  | Installed, active, listening on `*:9100`      |
-| `prometheus` 2.42.0               | Installed, active, **default config** (TSDB mode on `*:9090`) |
-| `/etc/default/prometheus`         | `ARGS=""` (agent-mode flags not yet applied)  |
-| `/etc/prometheus/prometheus.yml`  | Debian default (scrapes self + node_exporter) |
-| `remote_write` configured         | **No — pending endpoint URL and auth**        |
+| Component                         | State                                                       |
+| --------------------------------- | ----------------------------------------------------------- |
+| `prometheus-node-exporter` 1.5.0  | Installed, active, listening on `*:9100`                    |
+| `prometheus` 2.42.0 (agent mode)  | Installed, active, bound to `127.0.0.1:9090`                |
+| `/etc/default/prometheus`         | Agent-mode flags via `ARGS=…`                               |
+| `/etc/prometheus/prometheus.yml`  | Scrapes local node_exporter, `remote_write`s to the droplet |
+| Shipping target                   | `https://167.99.251.176:9090/api/v1/write` (nginx-fronted, bearer auth, self-signed TLS) |
 
-Until the agent-mode flags and remote_write block are written, Prometheus
-on the Pi is just running its default local-TSDB config. It is *not*
-shipping anywhere yet.
+Confirmed flowing — `up{instance="raspberrypi", job="pi-metrics"} = 1`
+on the remote Prom.
 
-## Finalization (after URL + auth are provided)
+## Installed config
 
-### 1. Configure agent mode (Pi-side)
+The authoritative source lives in this repo under
+[`prometheus/`](../prometheus/):
 
-`/etc/default/prometheus`:
+| Repo file                                      | Deploys to                                  |
+| ---------------------------------------------- | ------------------------------------------- |
+| `prometheus/prometheus.yml`                    | `/etc/prometheus/prometheus.yml` (mode `0640`, `root:prometheus`) |
+| `prometheus/prometheus.defaults`               | `/etc/default/prometheus`                   |
+| `prometheus/prometheus-node-exporter.defaults` | `/etc/default/prometheus-node-exporter`     |
 
+`prometheus/prometheus.yml` contains a `${PROM_BEARER_TOKEN}` placeholder
+that must be substituted before installing. The token itself lives only
+in `~iot_bot/monitoring/.env` on the droplet (the source of truth) and
+in `/etc/prometheus/prometheus.yml` on the Pi (rendered from the
+template) — never in this repo.
+
+### Deploy / re-deploy
+
+```bash
+# 1. Fetch the token from the source of truth on the droplet.
+export PROM_BEARER_TOKEN=$(ssh iot_bot@167.99.251.176 \
+  'grep ^PROM_BEARER_TOKEN= ~/monitoring/.env | cut -d= -f2-' \
+  | tr -d '"'"'"' ')
+
+# 2. Render the templated yml and stage the three files on the Pi.
+envsubst < prometheus/prometheus.yml > /tmp/prometheus.yml.rendered
+chmod 600 /tmp/prometheus.yml.rendered
+scp -q /tmp/prometheus.yml.rendered \
+       prometheus/prometheus.defaults \
+       prometheus/prometheus-node-exporter.defaults \
+       iot_bot@192.168.100.8:/tmp/
+rm /tmp/prometheus.yml.rendered
+unset PROM_BEARER_TOKEN
+
+# 3. Install with sudo on the Pi (will prompt for password).
+ssh -t iot_bot@192.168.100.8 'sudo sh -c "
+  install -m 0640 -o root -g prometheus /tmp/prometheus.yml.rendered /etc/prometheus/prometheus.yml &&
+  install -m 0644 -o root -g root /tmp/prometheus.defaults /etc/default/prometheus &&
+  install -m 0644 -o root -g root /tmp/prometheus-node-exporter.defaults /etc/default/prometheus-node-exporter &&
+  rm /tmp/prometheus.yml.rendered /tmp/prometheus.defaults /tmp/prometheus-node-exporter.defaults &&
+  promtool check config /etc/prometheus/prometheus.yml &&
+  systemctl restart prometheus prometheus-node-exporter
+"'
 ```
-ARGS="--enable-feature=agent --storage.agent.path=/var/lib/prometheus/agent --web.listen-address=127.0.0.1:9090"
-```
 
-### 2. Replace `/etc/prometheus/prometheus.yml`
+The `--config.file` flag in `prometheus.defaults` is needed because the
+Debian unit runs `/usr/bin/prometheus $ARGS` with no working-directory
+trick, so the binary won't find `prometheus.yml` unless told.
 
-Template (root-owned, mode `0640` since it'll hold the remote_write token):
+The bearer token in `prometheus.yml` is checked on the droplet by an
+nginx `map $http_authorization` block before requests are proxied to
+Prom.
+
+### Why `relabel_configs` instead of `external_labels`
+
+The natural-looking first attempt was:
 
 ```yaml
 global:
-  scrape_interval: 30s
   external_labels:
-    instance: raspberrypi   # override per device fleet
+    instance: raspberrypi
     job: pi-metrics
-
-scrape_configs:
-  - job_name: node
-    static_configs:
-      - targets: ['127.0.0.1:9100']
-
-remote_write:
-  - url: https://<remote>/api/v1/write
-    # Pick ONE auth block (or omit both for unauthenticated):
-    basic_auth:
-      username: <user>
-      password: <pass>
-    # authorization:
-    #   type: Bearer
-    #   credentials: <token>
 ```
 
-### 3. Apply
+This **does not work**. `external_labels` only fills labels that are
+*missing* on a sample. After scraping, every sample already has
+`job="<job_name>"` (e.g. `node`) and `instance="<__address__>"`
+(`127.0.0.1:9100`) — both come from the scrape_config and target — so
+`external_labels` becomes a no-op. Samples land on the remote Prom under
+`job="node", instance="127.0.0.1:9100"`, colliding with what a locally
+scraped node_exporter on the remote host would look like. Symptom: Prom
+returns 204 to every write, the TSDB head_samples counter grows, but
+`up{instance="raspberrypi"}` is empty.
 
-```bash
-sudo systemctl daemon-reload  # not strictly needed; ARGS is via EnvironmentFile
-sudo systemctl restart prometheus
-systemctl status prometheus --no-pager
-journalctl -u prometheus -n 30 --no-pager
-```
+The fix is to set the desired identity *at scrape time*: name the scrape
+job `pi-metrics` so `job` is correct, and use `relabel_configs` to
+overwrite `instance`. Those labels are baked into the samples before
+remote_write sees them.
 
-### 4. Verify samples are flowing
+## Verifying samples are flowing
 
-- On the Pi: `ls /var/lib/prometheus/agent/wal/` should show segment files
-  appearing and rotating.
-- On the remote Prom: query `up{instance="raspberrypi", job="node"}` —
-  expect `1`. Then `node_cpu_seconds_total` etc. should appear.
+- **On the Pi**:
+  - `sudo ls /var/lib/prometheus/agent/wal/` — WAL segments rotating.
+  - `curl -s http://127.0.0.1:9090/api/v1/targets` — `health=up` for
+    `{instance: raspberrypi, job: pi-metrics}`.
+  - `curl -s http://127.0.0.1:9090/metrics | grep prometheus_remote_storage_samples_total`
+    grows; `samples_failed_total` stays at 0.
+- **On the remote Prom** (Prom listens on `127.0.0.1:9091` of the
+  droplet; the public nginx on `:9090` only proxies `/api/v1/write`, not
+  `/api/v1/query`, so query via SSH):
+  ```bash
+  ssh iot_bot@167.99.251.176 \
+    'curl -s "http://127.0.0.1:9091/api/v1/query?query=up%7Binstance%3D%22raspberrypi%22%7D"'
+  ```
+  Expect a vector result with value `1`.
+
+## Pending follow-ups
+
+1. **Rotate the bearer token.** During the initial setup the token was
+   briefly visible in a `curl -v` output captured in chat. To rotate:
+   1. Generate a new value on the droplet and write it to
+      `~iot_bot/monitoring/.env` (`PROM_BEARER_TOKEN=<new>`).
+   2. Update the `map $http_authorization` block in the
+      `prometheus-nginx` container's `nginx.conf` to match the new
+      `Bearer <new>` value, then reload nginx
+      (`docker exec prometheus-nginx nginx -s reload`).
+   3. Re-render `/etc/prometheus/prometheus.yml` on the Pi with the new
+      token (same `scp` + `sudo install -m 0640 -o root -g prometheus`
+      pattern) and `sudo systemctl restart prometheus`.
+   4. Verify the Pi's `prometheus_remote_storage_samples_failed_total`
+      stays at 0 — a non-zero counter means nginx is rejecting with 401.
+2. **Replace the self-signed cert with a real one** (optional). Point a
+   domain at `167.99.251.176` and run certbot (or similar) to issue a
+   trusted cert for the nginx container, then drop
+   `tls_config.insecure_skip_verify` from the Pi's `prometheus.yml`. The
+   pipeline already runs over TLS today; this just gets us actual cert
+   validation.
 
 ## Operations
 
@@ -151,9 +216,12 @@ prometheus-node-exporter`).
   it. That's fine for a home network but worth tightening (bind
   `127.0.0.1:9100` and only let local Prom scrape it) if the LAN isn't
   trusted.
-- `/etc/prometheus/prometheus.yml` will hold the remote_write credentials.
-  Keep it `root:root` mode `0640` — Prom runs as `prometheus` which
-  belongs to the `prometheus` group with read access.
+- `/etc/prometheus/prometheus.yml` holds the remote_write bearer token.
+  Install it `root:prometheus` mode `0640` so Prom (running as
+  `prometheus`, via group membership) can read it but other users can't.
+  If the token leaks, rotate it on the droplet (`~iot_bot/monitoring/.env`),
+  update the nginx `map $http_authorization` block on the droplet, and
+  re-render this file with the new value.
 - If Prom's WAL ever balloons (e.g. remote endpoint down for hours), it
   lives at `/var/lib/prometheus/agent/`. Disk usage there is bounded by
   retention but grows during outages.

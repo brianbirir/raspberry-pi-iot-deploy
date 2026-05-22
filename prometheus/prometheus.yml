@@ -1,0 +1,23 @@
+# Deployed to /etc/prometheus/prometheus.yml on the Pi (mode 0640, root:prometheus).
+# Prometheus runs in agent mode — see prometheus.defaults for the CLI flags.
+#
+# The bearer_token is templated. Substitute ${PROM_BEARER_TOKEN} before
+# installing (e.g. `envsubst < prometheus.yml | sudo tee /etc/prometheus/prometheus.yml`).
+# Token rotation procedure is documented in doc/pi-metrics-prometheus.md.
+
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: pi-metrics
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+    relabel_configs:
+      - target_label: instance
+        replacement: raspberrypi
+
+remote_write:
+  - url: https://167.99.251.176:9090/api/v1/write
+    bearer_token: ${PROM_BEARER_TOKEN}
+    tls_config:
+      insecure_skip_verify: true   # self-signed cert on the droplet

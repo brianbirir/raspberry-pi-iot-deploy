@@ -1,0 +1,5 @@
+# Deployed to /etc/default/prometheus-node-exporter on the Pi.
+# Currently using the Debian package defaults — no custom flags.
+# Add to ARGS to enable/disable collectors or change bind address, e.g.:
+#   ARGS="--web.listen-address=127.0.0.1:9100 --no-collector.wifi"
+ARGS=""
