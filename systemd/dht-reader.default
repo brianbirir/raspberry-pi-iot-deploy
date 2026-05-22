@@ -1,0 +1,14 @@
+# Environment for dht-reader.service.
+# Installed at /etc/default/dht-reader (root-owned, mode 0640).
+
+# Required for remote telemetry. If unset, readings are only logged to journal.
+TELEMETRY_URL=
+
+# Full Authorization header value (e.g. "Bearer abc123"). Leave empty for none.
+TELEMETRY_AUTH=
+
+# Optional overrides:
+#DHT_PORT=/dev/ttyACM0
+#DHT_BAUD=9600
+#TELEMETRY_TIMEOUT=5.0
+#DEVICE_ID=raspberrypi

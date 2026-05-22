@@ -1,0 +1,17 @@
+[Unit]
+Description=DHT11 reader (Arduino over USB serial)
+After=network.target
+
+[Service]
+Type=simple
+User=iot_bot
+WorkingDirectory=/home/iot_bot
+EnvironmentFile=-/etc/default/dht-reader
+ExecStart=/usr/bin/python3 /home/iot_bot/read_dht.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
