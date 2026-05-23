@@ -1,111 +1,91 @@
 #!/usr/bin/env python3
-"""Read DHT11 readings from an Arduino over serial and POST them to a remote
-HTTP endpoint as JSON.
+"""DHT11 Prometheus exporter.
+
+Reads CSV temperature/humidity lines from an Arduino over USB serial and
+exposes them as gauges for Prometheus to scrape.
 
 Config (environment variables):
-  DHT_PORT          Serial device (default: /dev/ttyACM0)
-  DHT_BAUD          Baud rate    (default: 9600)
-  DHT_TIMEOUT       Serial read timeout, seconds (default: 2.0)
-  TELEMETRY_URL     POST endpoint. If empty, readings are only logged.
-  TELEMETRY_AUTH    Full Authorization header value, e.g. "Bearer abc123"
-  TELEMETRY_TIMEOUT HTTP timeout, seconds (default: 5.0)
-  DEVICE_ID         Identifier sent with each reading (default: hostname)
+  DHT_PORT       Serial device (default: /dev/ttyACM0)
+  DHT_BAUD       Baud rate (default: 9600)
+  DHT_TIMEOUT    Serial read timeout, seconds (default: 2.0)
+  METRICS_PORT   Port to expose /metrics on (default: 9101)
+  METRICS_ADDR   Address to bind (default: 127.0.0.1)
 
-Payload format:
-  {"ts": "<iso8601-utc>", "device": "<id>",
-   "temperature_c": <float>, "humidity_pct": <float>}
+Exposes:
+  dht_temperature_celsius              latest reading
+  dht_humidity_percent                 latest reading
+  dht_last_reading_timestamp_seconds   unix ts of last reading (0 = never)
 """
 
-import json
 import os
-import socket
 import sys
 import time
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
 
 import serial
+from prometheus_client import Gauge, start_http_server
 
 
-def post_reading(url: str, auth: str, payload: dict, timeout: float) -> None:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    if auth:
-        req.add_header("Authorization", auth)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        if resp.status >= 300:
-            raise urllib.error.HTTPError(
-                url, resp.status, resp.reason, resp.headers, None
-            )
+temperature_c = Gauge(
+    "dht_temperature_celsius",
+    "Most recent DHT temperature reading in Celsius.",
+)
+humidity_pct = Gauge(
+    "dht_humidity_percent",
+    "Most recent DHT humidity reading in percent.",
+)
+last_reading_ts = Gauge(
+    "dht_last_reading_timestamp_seconds",
+    "Unix timestamp of the most recent successful reading (0 = none yet).",
+)
 
 
-def read_loop(port: str, baud: int, serial_timeout: float,
-              url: str, auth: str, http_timeout: float,
-              device: str) -> None:
-    with serial.Serial(port, baud, timeout=serial_timeout) as ser:
-        time.sleep(2)  # Arduino resets when the port opens
-        ser.reset_input_buffer()
-
-        while True:
-            line = ser.readline().decode("utf-8", errors="replace").strip()
-            if not line:
-                continue
-
-            parts = line.split(",")
-            if len(parts) != 2:
-                print(f"skip: {line!r}", file=sys.stderr)
-                continue
-
-            try:
-                temp_c, humidity = (float(p) for p in parts)
-            except ValueError:
-                print(f"skip: {line!r}", file=sys.stderr)
-                continue
-
-            payload = {
-                "ts": datetime.now(timezone.utc).isoformat(
-                    timespec="seconds"
-                ).replace("+00:00", "Z"),
-                "device": device,
-                "temperature_c": round(temp_c, 1),
-                "humidity_pct": round(humidity, 1),
-            }
-            print(json.dumps(payload), flush=True)
-
-            if not url:
-                continue
-
-            try:
-                post_reading(url, auth, payload, http_timeout)
-            except (urllib.error.URLError, urllib.error.HTTPError,
-                    TimeoutError, OSError) as exc:
-                # Drop this reading; the next one is ~1 s away.
-                print(f"post failed: {exc}", file=sys.stderr)
+def read_loop(port: str, baud: int, serial_timeout: float) -> None:
+    while True:
+        try:
+            with serial.Serial(port, baud, timeout=serial_timeout) as ser:
+                time.sleep(2)  # Arduino resets when the port opens
+                ser.reset_input_buffer()
+                while True:
+                    line = ser.readline().decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    parts = line.split(",")
+                    if len(parts) != 2:
+                        print(f"skip: {line!r}", file=sys.stderr)
+                        continue
+                    try:
+                        t, h = (float(p) for p in parts)
+                    except ValueError:
+                        print(f"skip: {line!r}", file=sys.stderr)
+                        continue
+                    temperature_c.set(round(t, 1))
+                    humidity_pct.set(round(h, 1))
+                    last_reading_ts.set_to_current_time()
+        except serial.SerialException as exc:
+            # Keep the metrics endpoint up so Prom can still scrape and
+            # surface staleness via dht_last_reading_timestamp_seconds.
+            print(f"serial error: {exc}", file=sys.stderr)
+            time.sleep(5)
 
 
 def main() -> None:
     port = os.environ.get("DHT_PORT", "/dev/ttyACM0")
     baud = int(os.environ.get("DHT_BAUD", "9600"))
     serial_timeout = float(os.environ.get("DHT_TIMEOUT", "2.0"))
-    url = os.environ.get("TELEMETRY_URL", "").strip()
-    auth = os.environ.get("TELEMETRY_AUTH", "").strip()
-    http_timeout = float(os.environ.get("TELEMETRY_TIMEOUT", "5.0"))
-    device = os.environ.get("DEVICE_ID", "").strip() or socket.gethostname()
+    metrics_port = int(os.environ.get("METRICS_PORT", "9101"))
+    metrics_addr = os.environ.get("METRICS_ADDR", "127.0.0.1")
 
-    if not url:
-        print("TELEMETRY_URL not set — readings will only be logged",
-              file=sys.stderr)
+    temperature_c.set(float("nan"))
+    humidity_pct.set(float("nan"))
+    last_reading_ts.set(0)
+
+    start_http_server(metrics_port, addr=metrics_addr)
+    print(f"metrics on http://{metrics_addr}:{metrics_port}/metrics", flush=True)
 
     try:
-        read_loop(port, baud, serial_timeout,
-                  url, auth, http_timeout, device)
+        read_loop(port, baud, serial_timeout)
     except KeyboardInterrupt:
         pass
-    except serial.SerialException as exc:
-        print(f"serial error: {exc}", file=sys.stderr)
-        sys.exit(1)
 
 
 if __name__ == "__main__":

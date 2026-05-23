@@ -16,6 +16,13 @@ scrape_configs:
       - target_label: instance
         replacement: raspberrypi
 
+  - job_name: dht-sensor
+    static_configs:
+      - targets: ['127.0.0.1:9101']
+    relabel_configs:
+      - target_label: instance
+        replacement: raspberrypi
+
 remote_write:
   - url: https://167.99.251.176:9090/api/v1/write
     bearer_token: ${PROM_BEARER_TOKEN}

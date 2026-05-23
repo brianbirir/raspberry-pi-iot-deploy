@@ -5,13 +5,14 @@ managed with help from an AI agent (Claude Code). Currently it does two
 things:
 
 1. **Reads a DHT11 sensor** (temperature + humidity) connected to an
-   Arduino Uno over USB serial, and POSTs each reading as JSON to a
-   remote HTTP endpoint.
-2. **Ships its own host metrics** (CPU, memory, disk, network, …) to a
-   self-hosted Prometheus + Grafana stack on a DigitalOcean droplet,
-   using Prometheus in agent mode + `remote_write`.
+   Arduino Uno over USB serial, and exposes the readings as Prometheus
+   gauges on a local HTTP endpoint.
+2. **Ships its own host metrics** (CPU, memory, disk, network, …) and
+   the DHT readings to a self-hosted Prometheus + Grafana stack on a
+   DigitalOcean droplet, using Prometheus in agent mode + `remote_write`.
 
-Both run as systemd services on the Pi and survive reboots.
+Both run as systemd services on the Pi and survive reboots; Grafana on
+the droplet visualizes everything from the same Prometheus datasource.
 
 ## Hardware
 

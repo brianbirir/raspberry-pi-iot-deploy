@@ -148,6 +148,35 @@ job `pi-metrics` so `job` is correct, and use `relabel_configs` to
 overwrite `instance`. Those labels are baked into the samples before
 remote_write sees them.
 
+### Label scheme & Grafana compatibility
+
+Samples land on the remote Prom with:
+
+- `job="pi-metrics"`
+- `instance="raspberrypi"`
+
+**The `job` value is intentionally non-standard.** The node_exporter
+community convention is `job="node"`, which most public Grafana
+dashboards (e.g. dashboard 1860 "Node Exporter Full") hardcode in their
+queries. Symptom of the mismatch: a freshly-imported dashboard shows
+"No data" on every panel even though `up{instance="raspberrypi"}` is 1
+on the Prom server.
+
+Fix on the dashboard side (preferred — keeps this repo unchanged):
+
+1. Open the dashboard → Settings (gear) → **Variables** → find the
+   `job` variable. If it's defined as
+   `label_values(node_cpu_seconds_total, job)`, the `pi-metrics` value
+   will appear in the dropdown at the top of the dashboard; just select
+   it and save.
+2. For panels that still show "No data," edit them and change any
+   hardcoded `{job="node"}` to `{job="pi-metrics"}`, or drop the
+   `job=` matcher entirely since `instance="raspberrypi"` is unique.
+
+Alternative (single-edit, breaks any "pi-metrics" series we've already
+sent — they'd age out): rename `job_name: pi-metrics` back to `node` in
+`prometheus/prometheus.yml` and redeploy.
+
 ## Verifying samples are flowing
 
 - **On the Pi**:
