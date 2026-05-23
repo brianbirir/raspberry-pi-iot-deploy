@@ -30,6 +30,7 @@ src/read_dht.py              Pi-side DHT11 Prometheus exporter
 src/arduino/dht11_serial/    Arduino sketch (DHT11 → CSV over serial)
 configs/systemd/             Unit + env-file for the dht-reader service
 configs/prometheus/          Prom + node_exporter configs deployed to the Pi
+configs/grafana/dashboards/  Importable Grafana dashboards
 doc/                         Setup / operations docs
 ```
 

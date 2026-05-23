@@ -139,22 +139,54 @@ scp src/read_dht.py iot_bot@192.168.100.8:/home/iot_bot/
 ssh iot_bot@192.168.100.8 'sudo systemctl restart dht-reader'
 ```
 
-## Grafana queries
+## Grafana
 
-The metrics live in the droplet Prometheus alongside the host metrics.
-Useful PromQL for panels (drop the `{instance="raspberrypi"}` matcher
-when you only have one Pi):
+### Ready-to-import dashboard
 
-| Panel               | Query                                                                                   |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| Temperature (°C)    | `dht_temperature_celsius{instance="raspberrypi"}`                                       |
-| Humidity (%)        | `dht_humidity_percent{instance="raspberrypi"}`                                          |
-| Seconds since last reading | `time() - dht_last_reading_timestamp_seconds{instance="raspberrypi"}`            |
-| Stale > 2 min       | `(time() - dht_last_reading_timestamp_seconds{instance="raspberrypi"}) > 120` (alert)   |
+A pre-built dashboard lives at
+[`configs/grafana/dashboards/dht11.json`](../configs/grafana/dashboards/dht11.json).
+It has five panels:
 
-For graphing, set the panel unit to **Celsius** for temperature and
-**Percent (0-100)** for humidity. Add the *Stale* expression as an alert
-rule if you want notification when the Arduino disconnects.
+| Panel                           | Query                                                                  |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| Stat: Temperature               | `dht_temperature_celsius{instance="$instance"}`                        |
+| Stat: Humidity                  | `dht_humidity_percent{instance="$instance"}`                           |
+| Stat: Seconds since last reading | `time() - (dht_last_reading_timestamp_seconds{instance="$instance"} > 0)` |
+| Time series: Temperature        | `dht_temperature_celsius{instance="$instance"}`                        |
+| Time series: Humidity           | `dht_humidity_percent{instance="$instance"}`                           |
+
+The `$instance` template variable is populated from
+`label_values(dht_temperature_celsius, instance)`, so it'll show every
+Pi sending DHT readings (currently just `raspberrypi`).
+
+The freshness stat uses `... > 0` so the value is **empty (—) before
+the first reading** rather than displaying "57 years ago" because the
+gauge starts at 0.
+
+#### Import
+
+1. Open Grafana on the droplet: <http://167.99.251.176:3000>
+2. Left nav → **Dashboards** → **New** (top right) → **Import**
+3. **Upload JSON file** → pick `configs/grafana/dashboards/dht11.json`
+   from this repo (or paste its contents into the textarea)
+4. Grafana will prompt for the **Prometheus** datasource — select the
+   one pointed at the droplet's local Prom (the receiver of remote_write)
+5. Click **Import**
+
+The dashboard auto-refreshes every 30 s (matching the scrape interval).
+Time range defaults to *Last 1 hour*; widen it from the top-right picker
+once you have history.
+
+### PromQL cheatsheet (for ad-hoc / custom panels)
+
+Drop the `{instance="raspberrypi"}` matcher when you only have one Pi.
+
+| Need                       | Query                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| Temperature (°C)           | `dht_temperature_celsius{instance="raspberrypi"}`                                    |
+| Humidity (%)               | `dht_humidity_percent{instance="raspberrypi"}`                                       |
+| Seconds since last reading | `time() - (dht_last_reading_timestamp_seconds{instance="raspberrypi"} > 0)`          |
+| Alert: stale > 2 min       | `(time() - (dht_last_reading_timestamp_seconds{instance="raspberrypi"} > 0)) > 120`  |
 
 ## Operations
 
