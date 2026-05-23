@@ -28,8 +28,9 @@ the droplet visualizes everything from the same Prometheus datasource.
 ```
 src/read_dht.py              Pi-side DHT11 Prometheus exporter
 src/arduino/dht11_serial/    Arduino sketch (DHT11 → CSV over serial)
-configs/systemd/             Unit + env-file for the dht-reader service
-configs/prometheus/          Prom + node_exporter configs deployed to the Pi
+configs/systemd/             Pi: unit + env-file for the dht-reader service
+configs/prometheus/          Pi: Prom agent + node_exporter configs
+configs/monitoring/          Droplet: docker-compose stack (Prom + nginx + Grafana)
 configs/grafana/dashboards/  Importable Grafana dashboards
 doc/                         Setup / operations docs
 ```

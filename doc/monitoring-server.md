@@ -152,9 +152,60 @@ monitoring/
         └── server.key          # mode 600
 ```
 
-**Secrets never leave the droplet.** `.env` and `nginx/nginx.conf` are the
-only places that hold the bearer token and Grafana password. Neither is in
-this repo. To retrieve them: `ssh iot_bot@167.99.251.176 'cat ~/monitoring/.env'`.
+**Secrets never leave the droplet.** `.env`, `nginx/nginx.conf`, and the
+TLS cert/key are the only places that hold the bearer token, Grafana
+password, and private key. None of those are in this repo. To retrieve
+the env: `ssh iot_bot@167.99.251.176 'cat ~/monitoring/.env'`.
+
+### Tracked in this repo
+
+| Droplet path                            | Repo path                                          |
+| --------------------------------------- | -------------------------------------------------- |
+| `~/monitoring/docker-compose.yml`       | `configs/monitoring/docker-compose.yml`            |
+| `~/monitoring/prometheus/prometheus.yml`| `configs/monitoring/prometheus/prometheus.yml`     |
+| `~/monitoring/nginx/nginx.conf.template`| `configs/monitoring/nginx/nginx.conf.template`     |
+| `~/monitoring/.env` (structure only)    | `configs/monitoring/.env.example`                  |
+
+Not tracked: `.env` (real values), rendered `nginx/nginx.conf` (embeds
+token), TLS cert/key. Regenerate the cert with `openssl` against CN
+`167.99.251.176`; regenerate the token with `openssl rand -hex 32`.
+
+### Deploy / re-deploy
+
+From the project root:
+
+```bash
+# Stage the tracked files on the droplet.
+scp configs/monitoring/docker-compose.yml \
+    iot_bot@167.99.251.176:~/monitoring/docker-compose.yml
+scp configs/monitoring/prometheus/prometheus.yml \
+    iot_bot@167.99.251.176:~/monitoring/prometheus/prometheus.yml
+scp configs/monitoring/nginx/nginx.conf.template \
+    iot_bot@167.99.251.176:~/monitoring/nginx/nginx.conf.template
+
+# Re-render nginx.conf from the template (token comes from .env).
+ssh iot_bot@167.99.251.176 'cd ~/monitoring && set -a && . ./.env && set +a &&
+  docker run --rm -e PROM_BEARER_TOKEN \
+    -v "$PWD/nginx/nginx.conf.template:/in:ro" \
+    nginx:1.27-alpine sh -c "envsubst \"\\\$PROM_BEARER_TOKEN\" < /in" \
+  > nginx/nginx.conf && chmod 600 nginx/nginx.conf'
+
+# Apply.
+ssh iot_bot@167.99.251.176 'cd ~/monitoring &&
+  docker compose up -d &&
+  docker compose exec nginx nginx -s reload &&
+  curl -sS -o /dev/null -w "prom reload: %{http_code}\n" \
+    -X POST http://127.0.0.1:9091/-/reload'
+```
+
+First-time bootstrap on a fresh droplet:
+
+1. `mkdir -p ~/monitoring/{prometheus,nginx/certs}` on the droplet.
+2. `cp configs/monitoring/.env.example` to the droplet as `.env`, fill
+   in real values (`chmod 600`).
+3. Generate the self-signed cert into `~/monitoring/nginx/certs/`
+   (CN=`167.99.251.176`, 10-yr).
+4. Run the deploy block above.
 
 ## Pi-side configuration
 
