@@ -87,6 +87,19 @@ template) — never in this repo.
 
 ### Deploy / re-deploy
 
+**Recommended:** from the project root run
+
+```bash
+./scripts/deploy-pi.sh
+```
+
+It installs apt deps, fetches the bearer token from the droplet's
+`.env`, renders `prometheus.yml`, ships everything to the Pi, and
+restarts `dht-reader`, `prometheus`, and `prometheus-node-exporter`.
+Pass `--skip-apt` after the first run to skip the package step.
+
+The script is idempotent. The equivalent manual steps:
+
 ```bash
 # 1. Fetch the token from the source of truth on the droplet.
 export PROM_BEARER_TOKEN=$(ssh iot_bot@167.99.251.176 \

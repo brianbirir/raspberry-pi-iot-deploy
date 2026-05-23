@@ -172,7 +172,20 @@ token), TLS cert/key. Regenerate the cert with `openssl` against CN
 
 ### Deploy / re-deploy
 
-From the project root:
+**Recommended:** from the project root run
+
+```bash
+./scripts/deploy-monitoring.sh
+```
+
+It checks the droplet for `.env` + TLS cert, scp's the tracked files,
+re-renders `nginx/nginx.conf` via `envsubst` in a throwaway nginx
+container, runs `docker compose config -q` + `docker compose up -d`,
+and reloads nginx + Prom in place. Pass `--no-reload` to skip the
+runtime reloads (useful when only the compose file changed and you want
+the new container to take over instead).
+
+The script is idempotent. The equivalent manual steps:
 
 ```bash
 # Stage the tracked files on the droplet.

@@ -115,24 +115,17 @@ Key choices:
 
 ## Deployment
 
-From the project root:
+The DHT reader is installed by the same script that sets up the Prom
+agent (it ships both in one pass — they're co-located on the Pi):
 
 ```bash
-scp src/read_dht.py configs/systemd/dht-reader.service configs/systemd/dht-reader.default \
-    iot_bot@192.168.100.8:/home/iot_bot/
-ssh iot_bot@192.168.100.8 'sudo sh -c "
-  install -m 0644 ~iot_bot/dht-reader.service /etc/systemd/system/dht-reader.service &&
-  install -m 0644 ~iot_bot/dht-reader.default /etc/default/dht-reader &&
-  rm ~iot_bot/dht-reader.service ~iot_bot/dht-reader.default &&
-  systemctl daemon-reload &&
-  systemctl enable --now dht-reader.service
-"'
+./scripts/deploy-pi.sh
 ```
 
-After any change to `configs/prometheus/prometheus.yml`, redeploy that too — see
-[`pi-metrics-prometheus.md`](./pi-metrics-prometheus.md#deploy--re-deploy).
+See [`pi-metrics-prometheus.md`](./pi-metrics-prometheus.md#deploy--re-deploy)
+for what the script does end-to-end and the equivalent manual steps.
 
-Re-deploying just the script after edits:
+Quick redeploy of just the Python script after a local edit:
 
 ```bash
 scp src/read_dht.py iot_bot@192.168.100.8:/home/iot_bot/

@@ -32,6 +32,7 @@ configs/systemd/             Pi: unit + env-file for the dht-reader service
 configs/prometheus/          Pi: Prom agent + node_exporter configs
 configs/monitoring/          Droplet: docker-compose stack (Prom + nginx + Grafana)
 configs/grafana/dashboards/  Importable Grafana dashboards
+scripts/                     Deploy scripts (Pi + droplet)
 doc/                         Setup / operations docs
 ```
 
@@ -44,6 +45,18 @@ doc/                         Setup / operations docs
   Pi host metrics → self-hosted Prometheus via `remote_write`: agent-mode
   config, tracked configs in `configs/prometheus/`, deploy workflow, the
   `relabel_configs` vs `external_labels` gotcha, token rotation.
+
+## Deployment
+
+```bash
+./scripts/deploy-pi.sh           # Pi: DHT reader + Prom agent + node_exporter
+./scripts/deploy-monitoring.sh   # Droplet: Prometheus + nginx + Grafana stack
+```
+
+Both scripts are idempotent — re-run them after any change to the
+tracked files. See `scripts/deploy-*.sh` headers for env-var overrides
+(`PI_HOST`, `DROPLET_HOST`, `PROM_BEARER_TOKEN`, etc.) and the
+respective docs in `doc/` for what they install end-to-end.
 
 ## Quick ops cheatsheet
 
