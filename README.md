@@ -26,11 +26,11 @@ the droplet visualizes everything from the same Prometheus datasource.
 ## Repo layout
 
 ```
-arduino/dht11_serial/    Arduino sketch (DHT11 → CSV over serial)
-read_dht.py              Pi-side reader: parses serial + POSTs JSON
-systemd/                 Unit + env-file for the dht-reader service
-prometheus/              Prom + node_exporter configs deployed to the Pi
-doc/                     Setup / operations docs
+src/read_dht.py              Pi-side DHT11 Prometheus exporter
+src/arduino/dht11_serial/    Arduino sketch (DHT11 → CSV over serial)
+configs/systemd/             Unit + env-file for the dht-reader service
+configs/prometheus/          Prom + node_exporter configs deployed to the Pi
+doc/                         Setup / operations docs
 ```
 
 ## Documentation
@@ -40,7 +40,7 @@ doc/                     Setup / operations docs
   ops, troubleshooting.
 - **[doc/pi-metrics-prometheus.md](doc/pi-metrics-prometheus.md)** —
   Pi host metrics → self-hosted Prometheus via `remote_write`: agent-mode
-  config, tracked configs in `prometheus/`, deploy workflow, the
+  config, tracked configs in `configs/prometheus/`, deploy workflow, the
   `relabel_configs` vs `external_labels` gotcha, token rotation.
 
 ## Quick ops cheatsheet

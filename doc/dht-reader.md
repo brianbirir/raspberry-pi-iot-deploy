@@ -44,7 +44,7 @@ DHT11 ──► Arduino Uno ──USB serial──► dht-reader (:9101/metrics)
 | `dht_humidity_percent`                | gauge | Latest reading; `NaN` before the first successful read.     |
 | `dht_last_reading_timestamp_seconds`  | gauge | Unix ts of the last successful read (`0` = never).          |
 
-Labels (set by the scrape job — see `prometheus/prometheus.yml`):
+Labels (set by the scrape job — see `configs/prometheus/prometheus.yml`):
 `{job="dht-sensor", instance="raspberrypi"}`.
 
 ## Hardware
@@ -63,7 +63,7 @@ The Uno connects to the Pi over USB. Linux enumerates it as
 
 ## Arduino sketch
 
-Path: `arduino/dht11_serial/dht11_serial.ino`
+Path: `src/arduino/dht11_serial/dht11_serial.ino`
 
 Libraries (Arduino IDE → Library Manager):
 
@@ -75,7 +75,7 @@ Python side never sees malformed data.
 
 ## Python exporter
 
-Path: `read_dht.py` (deployed to `/home/iot_bot/read_dht.py` on the Pi)
+Path: `src/read_dht.py` (deployed to `/home/iot_bot/read_dht.py` on the Pi)
 
 Dependencies (apt): `python3-serial`, `python3-prometheus-client` (both
 installed on the Pi).
@@ -108,7 +108,7 @@ Key choices:
 - `User=iot_bot` — `iot_bot` is in the `dialout` group so it can open
   `/dev/ttyACM0`.
 - `EnvironmentFile=-/etc/default/dht-reader` — optional overrides; the
-  template is `systemd/dht-reader.default` (no secrets, just settings).
+  template is `configs/systemd/dht-reader.default` (no secrets, just settings).
 - `Restart=always`, `RestartSec=5` — safety net. The script itself
   doesn't crash on serial errors any more (it retries internally), so
   this only kicks in for unhandled failures.
@@ -118,7 +118,7 @@ Key choices:
 From the project root:
 
 ```bash
-scp read_dht.py systemd/dht-reader.service systemd/dht-reader.default \
+scp src/read_dht.py configs/systemd/dht-reader.service configs/systemd/dht-reader.default \
     iot_bot@192.168.100.8:/home/iot_bot/
 ssh iot_bot@192.168.100.8 'sudo sh -c "
   install -m 0644 ~iot_bot/dht-reader.service /etc/systemd/system/dht-reader.service &&
@@ -129,13 +129,13 @@ ssh iot_bot@192.168.100.8 'sudo sh -c "
 "'
 ```
 
-After any change to `prometheus/prometheus.yml`, redeploy that too — see
+After any change to `configs/prometheus/prometheus.yml`, redeploy that too — see
 [`pi-metrics-prometheus.md`](./pi-metrics-prometheus.md#deploy--re-deploy).
 
 Re-deploying just the script after edits:
 
 ```bash
-scp read_dht.py iot_bot@192.168.100.8:/home/iot_bot/
+scp src/read_dht.py iot_bot@192.168.100.8:/home/iot_bot/
 ssh iot_bot@192.168.100.8 'sudo systemctl restart dht-reader'
 ```
 

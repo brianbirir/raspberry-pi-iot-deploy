@@ -71,7 +71,7 @@ on the remote Prom.
 ## Installed config
 
 The authoritative source lives in this repo under
-[`prometheus/`](../prometheus/):
+[`configs/prometheus/`](../configs/prometheus/):
 
 | Repo file                                      | Deploys to                                  |
 | ---------------------------------------------- | ------------------------------------------- |
@@ -79,7 +79,7 @@ The authoritative source lives in this repo under
 | `prometheus/prometheus.defaults`               | `/etc/default/prometheus`                   |
 | `prometheus/prometheus-node-exporter.defaults` | `/etc/default/prometheus-node-exporter`     |
 
-`prometheus/prometheus.yml` contains a `${PROM_BEARER_TOKEN}` placeholder
+`configs/prometheus/prometheus.yml` contains a `${PROM_BEARER_TOKEN}` placeholder
 that must be substituted before installing. The token itself lives only
 in `~iot_bot/monitoring/.env` on the droplet (the source of truth) and
 in `/etc/prometheus/prometheus.yml` on the Pi (rendered from the
@@ -94,11 +94,11 @@ export PROM_BEARER_TOKEN=$(ssh iot_bot@167.99.251.176 \
   | tr -d '"'"'"' ')
 
 # 2. Render the templated yml and stage the three files on the Pi.
-envsubst < prometheus/prometheus.yml > /tmp/prometheus.yml.rendered
+envsubst < configs/prometheus/prometheus.yml > /tmp/prometheus.yml.rendered
 chmod 600 /tmp/prometheus.yml.rendered
 scp -q /tmp/prometheus.yml.rendered \
-       prometheus/prometheus.defaults \
-       prometheus/prometheus-node-exporter.defaults \
+       configs/prometheus/prometheus.defaults \
+       configs/prometheus/prometheus-node-exporter.defaults \
        iot_bot@192.168.100.8:/tmp/
 rm /tmp/prometheus.yml.rendered
 unset PROM_BEARER_TOKEN
@@ -175,7 +175,7 @@ Fix on the dashboard side (preferred — keeps this repo unchanged):
 
 Alternative (single-edit, breaks any "pi-metrics" series we've already
 sent — they'd age out): rename `job_name: pi-metrics` back to `node` in
-`prometheus/prometheus.yml` and redeploy.
+`configs/prometheus/prometheus.yml` and redeploy.
 
 ## Verifying samples are flowing
 
