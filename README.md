@@ -16,16 +16,13 @@ the droplet visualizes everything from the same Prometheus datasource.
 
 ## Hardware
 
-- **Raspberry Pi** running Debian 12 (bookworm), on the LAN at
-  `192.168.100.8`. SSH user: `iot_bot`.
-- **Arduino Uno** plugged into the Pi over USB (enumerates as
-  `/dev/ttyACM0`), sampling a **DHT11** sensor on digital pin 2.
-- **Droplet** (`167.99.251.176`) running Prometheus + Grafana + nginx
-  in Docker, accepting `remote_write` from the Pi.
+- **Raspberry Pi** running Debian 12 (bookworm), on the LAN at a specific static IP address of your definition that fits within your network (mine is `192.168.100.8`). SSH user: `iot_bot`.
+- **Arduino Uno** plugged into the Pi over USB (enumerates as `/dev/ttyACM0`), sampling a **DHT11** sensor on digital pin 2.
+- **Remote Server (Digital Ocean Droplet for my case)** (`167.99.251.176`) running Prometheus + Grafana + nginx in Docker, accepting `remote_write` from the Pi.
 
 ## Repo layout
 
-```
+```txt
 src/read_dht.py              Pi-side DHT11 Prometheus exporter
 src/arduino/dht11_serial/    Arduino sketch (DHT11 → CSV over serial)
 configs/systemd/             Pi: unit + env-file for the dht-reader service
@@ -67,13 +64,13 @@ See [`doc/deployment.md`](doc/deployment.md) for the full flow diagram,
 the `ensure_iot_bot` algorithm, env-var overrides, and the per-host
 prereqs.
 
-## Quick ops cheatsheet
+## Quick Operations Cheat Sheet
 
 ```bash
 # SSH to the Pi
 ssh iot_bot@192.168.100.8
 
-# DHT11 reader
+# DHT11 reader app status
 systemctl status dht-reader
 journalctl -u dht-reader -f
 
