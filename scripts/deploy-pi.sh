@@ -5,6 +5,9 @@
 # Idempotent — re-run anytime the tracked files change.
 #
 # What it does:
+#   0. ensure_iot_bot: checks for the iot_bot user on the Pi; if missing
+#      (or sudo isn't passwordless), bootstraps it via $PI_BOOTSTRAP_USER
+#      (useradd, sudo group, NOPASSWD sudoers.d, authorize local pubkey).
 #   1. Installs apt packages (prometheus, prometheus-node-exporter,
 #      python3-serial, python3-prometheus-client).
 #   2. Adds iot_bot to the dialout group (for /dev/ttyACM0 access).
@@ -15,28 +18,30 @@
 #      defaults file, and the rendered prometheus.yml.
 #   5. Enables + (re)starts dht-reader, prometheus, prometheus-node-exporter.
 #
-# sudo on the Pi requires a password. This script uses `ssh -t` so you
-# can type it interactively when prompted (once, the sudo session is
-# cached for the remaining commands in the same shell).
-#
 # Overrides via env vars:
-#   PI_HOST            default: iot_bot@192.168.100.8
-#   DROPLET_HOST       default: iot_bot@167.99.251.176  (token source)
-#   PROM_BEARER_TOKEN  if set, skips fetching from the droplet
+#   PI_HOST              default: 192.168.100.8
+#   PI_BOOTSTRAP_USER    default: pi (used only if iot_bot doesn't exist
+#                                     yet; needs sudo or root on the Pi)
+#   DROPLET_HOST         default: iot_bot@167.99.251.176  (token source)
+#   PROM_BEARER_TOKEN    if set, skips fetching from the droplet
 #
 # Flags:
-#   --skip-apt   skip the apt install step (packages already present)
+#   --skip-bootstrap   skip the iot_bot ensure step
+#   --skip-apt         skip the apt install step (packages already present)
 
 set -euo pipefail
 
-PI_HOST="${PI_HOST:-iot_bot@192.168.100.8}"
+PI_HOST="${PI_HOST:-192.168.100.8}"
+PI_BOOTSTRAP_USER="${PI_BOOTSTRAP_USER:-pi}"
 DROPLET_HOST="${DROPLET_HOST:-iot_bot@167.99.251.176}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 SKIP_APT=0
+SKIP_BOOTSTRAP=0
 for arg in "$@"; do
   case "$arg" in
     --skip-apt) SKIP_APT=1 ;;
+    --skip-bootstrap) SKIP_BOOTSTRAP=1 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -46,6 +51,76 @@ log() { printf '\n==> %s\n' "$*"; }
 for cmd in ssh scp envsubst; do
   command -v "$cmd" >/dev/null || { echo "missing: $cmd" >&2; exit 1; }
 done
+
+# Ensure iot_bot exists on $1 with passwordless sudo and our pubkey.
+# Idempotent. Args: host, sudo_group (sudo|wheel), bootstrap_user.
+ensure_iot_bot() {
+  local host="$1" sudo_group="$2" bootstrap_user="$3"
+
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+         -o StrictHostKeyChecking=accept-new \
+         "iot_bot@$host" 'sudo -n true' >/dev/null 2>&1; then
+    log "iot_bot on $host: present with passwordless sudo, skipping bootstrap"
+    return 0
+  fi
+
+  log "iot_bot on $host: bootstrapping via $bootstrap_user@$host"
+  local pubkey=""
+  if command -v ssh-add >/dev/null; then
+    pubkey=$(ssh-add -L 2>/dev/null | head -1 || true)
+  fi
+  if [[ -z "$pubkey" ]]; then
+    for k in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub ~/.ssh/id_ecdsa.pub; do
+      [[ -r "$k" ]] && { pubkey=$(cat "$k"); break; }
+    done
+  fi
+  [[ -n "$pubkey" ]] || {
+    echo "ERROR: no local SSH pubkey found (tried ssh-agent and ~/.ssh/*.pub)" >&2
+    exit 1
+  }
+
+  ssh -t -o StrictHostKeyChecking=accept-new "$bootstrap_user@$host" \
+    "SUDO_GROUP=$sudo_group PUBKEY='$pubkey' bash -s" <<'REMOTE'
+set -euo pipefail
+[[ $(id -u) == 0 ]] && SUDO="" || SUDO="sudo"
+
+if id -u iot_bot >/dev/null 2>&1; then
+  echo "iot_bot exists; ensuring sudo group + NOPASSWD + key are configured"
+else
+  echo "creating iot_bot"
+  $SUDO useradd -m -s /bin/bash iot_bot
+fi
+
+$SUDO usermod -aG "$SUDO_GROUP" iot_bot
+
+echo "iot_bot ALL=(ALL) NOPASSWD:ALL" \
+  | $SUDO tee /etc/sudoers.d/90-iot_bot-nopasswd >/dev/null
+$SUDO chmod 0440 /etc/sudoers.d/90-iot_bot-nopasswd
+$SUDO visudo -cf /etc/sudoers.d/90-iot_bot-nopasswd
+
+$SUDO install -d -o iot_bot -g iot_bot -m 0700 /home/iot_bot/.ssh
+$SUDO touch /home/iot_bot/.ssh/authorized_keys
+$SUDO chown iot_bot:iot_bot /home/iot_bot/.ssh/authorized_keys
+$SUDO chmod 0600 /home/iot_bot/.ssh/authorized_keys
+if ! $SUDO grep -qxF "$PUBKEY" /home/iot_bot/.ssh/authorized_keys 2>/dev/null; then
+  echo "$PUBKEY" | $SUDO tee -a /home/iot_bot/.ssh/authorized_keys >/dev/null
+fi
+REMOTE
+
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=5 \
+           "iot_bot@$host" 'sudo -n true' >/dev/null 2>&1; then
+    echo "ERROR: post-bootstrap SSH/sudo check failed for iot_bot@$host" >&2
+    exit 1
+  fi
+  log "iot_bot on $host: bootstrap complete"
+}
+
+if (( SKIP_BOOTSTRAP == 0 )); then
+  ensure_iot_bot "$PI_HOST" "sudo" "$PI_BOOTSTRAP_USER"
+fi
+
+# All remaining steps run as iot_bot, which now has passwordless sudo.
+PI_HOST="iot_bot@$PI_HOST"
 
 log "Resolving PROM_BEARER_TOKEN"
 if [[ -z "${PROM_BEARER_TOKEN:-}" ]]; then
@@ -81,8 +156,8 @@ scp -q "$REPO_ROOT/src/read_dht.py" \
        "$PI_HOST:/tmp/"
 unset PROM_BEARER_TOKEN
 
-log "Installing on Pi (sudo will prompt for password)"
-ssh -t "$PI_HOST" "SKIP_APT=$SKIP_APT bash -s" <<'REMOTE'
+log "Installing on Pi"
+ssh "$PI_HOST" "SKIP_APT=$SKIP_APT bash -s" <<'REMOTE'
 set -euo pipefail
 
 if (( SKIP_APT == 0 )); then

@@ -38,13 +38,18 @@ doc/                         Setup / operations docs
 
 ## Documentation
 
+- **[doc/deployment.md](doc/deployment.md)** — end-to-end deploy flow
+  (both scripts), `ensure_iot_bot` algorithm, flow diagram, overrides.
 - **[doc/dht-reader.md](doc/dht-reader.md)** — DHT11 → Arduino → Pi →
-  remote HTTP pipeline: wiring, sketch, Python script, systemd service,
-  ops, troubleshooting.
+  Prometheus pipeline: wiring, sketch, Python exporter, systemd service,
+  Grafana queries, ops, troubleshooting.
 - **[doc/pi-metrics-prometheus.md](doc/pi-metrics-prometheus.md)** —
   Pi host metrics → self-hosted Prometheus via `remote_write`: agent-mode
   config, tracked configs in `configs/prometheus/`, deploy workflow, the
   `relabel_configs` vs `external_labels` gotcha, token rotation.
+- **[doc/monitoring-server.md](doc/monitoring-server.md)** — remoter server
+  side: docker-compose stack, nginx auth + TLS, Grafana setup, first-time
+  bootstrap.
 
 ## Deployment
 
@@ -53,10 +58,14 @@ doc/                         Setup / operations docs
 ./scripts/deploy-monitoring.sh   # Droplet: Prometheus + nginx + Grafana stack
 ```
 
-Both scripts are idempotent — re-run them after any change to the
-tracked files. See `scripts/deploy-*.sh` headers for env-var overrides
-(`PI_HOST`, `DROPLET_HOST`, `PROM_BEARER_TOKEN`, etc.) and the
-respective docs in `doc/` for what they install end-to-end.
+Both scripts are idempotent and start with an `ensure_iot_bot` phase
+that creates and configures the `iot_bot` operator account (sudo group
+membership, NOPASSWD sudo, your SSH key authorized) if it doesn't
+already exist. Re-run them anytime tracked files change.
+
+See [`doc/deployment.md`](doc/deployment.md) for the full flow diagram,
+the `ensure_iot_bot` algorithm, env-var overrides, and the per-host
+prereqs.
 
 ## Quick ops cheatsheet
 
