@@ -4,6 +4,8 @@ http {
                            '"$request" $body_bytes_sent';
   access_log /var/log/nginx/access.log combined_safe;
 
+  # Bearer tokens are long; bump the map hash bucket so nginx can build it.
+  map_hash_bucket_size 128;
   map $http_authorization $token_ok {
     default 0;
     "Bearer ${PROM_BEARER_TOKEN}" 1;
